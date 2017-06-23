@@ -58,6 +58,8 @@ class QtApplication(QApplication, Application):
                     QCoreApplication.addLibraryPath(os.path.join(dir, "PyQt5", "plugins"))
         elif sys.platform == "darwin":
             plugin_path = os.path.join(Application.getInstallPrefix(), "Resources", "plugins")
+            os.environ["QTWEBENGINEPROCESS_PATH"] = os.path.join(Application.getInstallPrefix(), "MacOS", "QtWebEngineProcess.app", "Contents", "MacOS", "QtWebEngineProcess")
+            #  os.environ["QTWEBENGINEPROCESS_PATH"] = os.path.join(Application.getInstallPrefix(), "MacOS", "QtWebEngineProcess.app")
 
         if plugin_path:
             Logger.log("i", "Adding QT5 plugin path: %s" % (plugin_path))
