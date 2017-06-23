@@ -1,8 +1,8 @@
-    # Copyright (c) 2016 Ultimaker B.V.
+# Copyright (c) 2017 Ultimaker B.V.
 # Uranium is released under the terms of the AGPLv3 or higher.
 
 import os
-import re #For finding containers with asterisks in the constraints.
+import re #For finding containers with asterisks in the constraints and for detecting backup files.
 import urllib #For ensuring container file names are proper file names
 import urllib.parse
 import pickle #For serializing/deserializing Python classes to binary files
@@ -54,8 +54,12 @@ class ContainerRegistry(ContainerRegistryInterface):
         self._resource_types = [Resources.DefinitionContainers] # type: List[int]
         self._query_cache = collections.OrderedDict() # This should really be an ordered set but that does not exist...
 
+        #Since queries are based on metadata, we need to make sure to clear the cache when a container's metadata changes.
+        self.containerMetaDataChanged.connect(self._clearQueryCache)
+
     containerAdded = Signal()
     containerRemoved = Signal()
+    containerMetaDataChanged = Signal()
 
     def addResourceType(self, type: int) -> None:
         self._resource_types.append(type)
@@ -141,6 +145,8 @@ class ContainerRegistry(ContainerRegistryInterface):
     #   that were already added when the first call to this method happened will not be re-added.
     def load(self) -> None:
         files = []
+        old_file_expression = re.compile(r"\{sep}old\{sep}\d+\{sep}".format(sep = os.sep))
+
         for resource_type in self._resource_types:
             resources = Resources.getAllResourcesOfType(resource_type)
 
@@ -152,6 +158,10 @@ class ContainerRegistry(ContainerRegistryInterface):
             # Pre-process the list of files to insert relevant data
             # Most importantly, we need to ensure the loading order is DefinitionContainer, InstanceContainer, ContainerStack
             for path in resources:
+                if old_file_expression.search(path):
+                    # This is a backup file, ignore it.
+                    continue
+
                 try:
                     mime = MimeTypeDatabase.getMimeTypeForFile(path)
                 except MimeTypeDatabase.MimeTypeNotFoundError:
@@ -210,8 +220,7 @@ class ContainerRegistry(ContainerRegistryInterface):
             return
 
         if hasattr(container, "metaDataChanged"):
-            # Since queries are based on metadata, we need to make sure to clear the cache when a container's metadata changes.
-            container.metaDataChanged.connect(self._clearQueryCache)
+            container.metaDataChanged.connect(self._onContainerMetaDataChanged)
 
         self._containers.append(container)
         self._id_container_cache[container.getId()] = container
@@ -230,7 +239,7 @@ class ContainerRegistry(ContainerRegistryInterface):
             self._deleteFiles(container)
 
             if hasattr(container, "metaDataChanged"):
-                container.metaDataChanged.disconnect(self._clearQueryCache)
+                container.metaDataChanged.disconnect(self._onContainerMetaDataChanged)
 
             self._clearQueryCache()
             self.containerRemoved.emit(container)
@@ -343,7 +352,7 @@ class ContainerRegistry(ContainerRegistryInterface):
         if not name: #Wait, that deleted everything!
             name = "Profile"
         elif not self.findContainers(id = name, ignore_case = True) and not self.findContainers(name = name):
-            return original.strip()
+            return name
 
         unique_name = name
         i = 1
@@ -471,6 +480,13 @@ class ContainerRegistry(ContainerRegistryInterface):
     # Clear the internal query cache
     def _clearQueryCache(self, *args, **kwargs):
         self._query_cache.clear()
+
+    ##  Called when any container's metadata changed.
+    #
+    #   This function passes it on to the containerMetaDataChanged signal. Sadly
+    #   that doesn't work automatically between pyqtSignal and UM.Signal.
+    def _onContainerMetaDataChanged(self, *args, **kwargs):
+        self.containerMetaDataChanged.emit(*args, **kwargs)
 
     ##  Get the lock filename including full path
     #   Dependent on when you call this function, Resources.getConfigStoragePath may return different paths
